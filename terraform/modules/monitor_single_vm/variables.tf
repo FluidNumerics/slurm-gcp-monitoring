@@ -80,6 +80,12 @@ variable "region" {
   default     = null
 }
 
+variable "zone" {
+  description = "Zone where the instances should be created. If not specified, instances will be spread across available zones in the region."
+  type        = string
+  default     = null
+}
+
 variable "tags" {
   type        = list(string)
   description = "Network tag list."
@@ -125,6 +131,11 @@ variable "bandwidth_tier" {
 # INSTANCE #
 ############
 
+variable "hostname" {
+  description = "Hostname of instances"
+  type        = string
+  default     = ""
+}
 variable "machine_type" {
   type        = string
   description = "Machine type to create."
@@ -141,6 +152,20 @@ EOD
   default     = null
 }
 
+variable "access_config" {
+  description = "Access configurations, i.e. IPs via which the VM instance can be accessed via the Internet."
+  type = list(object({
+    nat_ip       = string
+    network_tier = string
+  }))
+  default = []
+}
+
+variable "num_instances" {
+  description = "Number of instances to create. This value is ignored if static_ips is provided."
+  type        = number
+  default     = 1
+}
 variable "service_account" {
   type = object({
     email  = string
@@ -176,6 +201,12 @@ EOD
     enable_secure_boot          = true
     enable_vtpm                 = true
   }
+}
+
+variable "static_ips" {
+  description = "List of static IPs for VM instances"
+  type        = list(string)
+  default     = []
 }
 
 variable "enable_confidential_vm" {

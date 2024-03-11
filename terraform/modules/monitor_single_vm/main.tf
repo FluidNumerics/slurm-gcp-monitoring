@@ -6,12 +6,8 @@ base_name = "${var.slurm_cluster_name}-monitor"
 }
 
 # Create the instance template for the monitor
-# To do - need a startup script that installs and starts
-# grafana, prometheus, go, and prometheus-slurm-exporter,
-# performs configurations to enable slurmd (configless slurm),
-# copies in grafana.ini and dashboard (json files). 
 module "slurm_monitoring_template" {
-  source = "./modules/slurm_instance_template"
+  source = "./modules/slurm_monitoring_instance_template"
 
   disk_auto_delete         = var.disk_auto_delete
   disk_labels              = var.disk_labels
@@ -46,55 +42,74 @@ module "slurm_monitoring_template" {
 ## For single server deployment, only need a VM
 ## This is useful when you are ok either exposing the external IP address to the outside
 ## world or using a VPN to reach the service. 
-## In this case
 
-## For managed instance group deployment ###
-## MIG deployment is necessary when you want to use a load balancer and identity aware proxy
-## This also requires a grafana.ini file that receives credentials from IAP
-# Create the health check for grafana on api/health:3000
-resource "google_compute_health_check" "grafana" {
-  name                = "${local.base_name}-grafana-health-check"
-  check_interval_sec  = 30
-  timeout_sec         = 10
-  healthy_threshold   = 3
-  unhealthy_threshold = 4
+locals {
+  scripts_dir = abspath("${path.module}/../../scripts")
+  hostname      = var.hostname == "" ? "default" : var.hostname
+  num_instances = length(var.static_ips) == 0 ? var.num_instances : length(var.static_ips)
 
-  http_health_check {
-    request_path = "/api/health"
-    port         = "3000"
-  }
+  # local.static_ips is the same as var.static_ips with a dummy element appended
+  # at the end of the list to work around "list does not have any elements so cannot
+  # determine type" error when var.static_ips is empty
+  static_ips = concat(var.static_ips, ["NOT_AN_IP"])
 }
 
-resource "google_compute_instance_group_manager" "slurm_monitor" {
-  name = "${local.base_name}-monitor"
-
-  base_instance_name = local.base_name
-  zone               = var.zone
-
-  version {
-    instance_template  = module.slurm_monitoring_template.self_link
-  }
-
-  all_instances_config {
-    metadata = {
-      metadata_key = "metadata_value"
-    }
-    labels = {
-      label_key = "label_value"
-    }
-  }
-
-  target_pools = [google_compute_target_pool.appserver.id]
-  target_size  = 1
-
-  named_port {
-    name = "grafana"
-    port = 3000
-  }
-
-  auto_healing_policies {
-    health_check      = google_compute_health_check.autohealing.id
-    initial_delay_sec = 300
-  }
+data "google_compute_zones" "available" {
+  project = var.project_id
+  region  = var.region
 }
+
+data "google_compute_instance_template" "base" {
+  project = var.project_id
+  name    = module.slurm_monitoring_template.instance_template
+}
+
+data "local_file" "startup" {
+  filename = abspath("${local.scripts_dir}/startup.sh")
+}
+
+resource "google_compute_instance_from_template" "slurm-gcp-monitor" {
+  count   = local.num_instances
+  name    = format("%s%s%s", local.hostname, "-", format("%03d", count.index + 1))
+  project = var.project_id
+  zone    = var.zone == null ? data.google_compute_zones.available.names[count.index % length(data.google_compute_zones.available.names)] : var.zone
+
+  allow_stopping_for_update = true
+
+  network_interface {
+    network            = var.network
+    subnetwork         = var.subnetwork
+    subnetwork_project = var.subnetwork_project
+    network_ip         = length(var.static_ips) == 0 ? "" : element(local.static_ips, count.index)
+    dynamic "access_config" {
+      for_each = var.access_config
+      content {
+        nat_ip       = access_config.value.nat_ip
+        network_tier = access_config.value.network_tier
+      }
+    }
+  }
+
+  source_instance_template = data.google_compute_instance_template.base.self_link
+
+  # Slurm
+  labels = merge(
+    data.google_compute_instance_template.base.labels,
+    {
+      slurm_cluster_name  = var.slurm_cluster_name
+      slurm_instance_role = "login"
+    },
+  )
+  metadata = merge(
+    data.google_compute_instance_template.base.metadata,
+    var.metadata,
+    {
+      slurm_cluster_name  = var.slurm_cluster_name
+      slurm_instance_role = "login"
+      startup-script      = data.local_file.startup.content
+      VmDnsSetting        = "GlobalOnly"
+    },
+  )
+}
+
 
