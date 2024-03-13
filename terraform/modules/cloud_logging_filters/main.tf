@@ -32,6 +32,41 @@ EOT
   project = var.project_id
 }
 
+resource "google_logging_metric" "gcp-error-cancelled-by-user" {
+  name   = "slurm-gcp/gcp-error-cancelled-by-user"
+  filter = <<-EOT
+logName="projects/${var.project_id}/logs/slurmctld"
+--Show similar entries
+jsonPayload.message=~"update_node: node [^ =\t\n\r\f\"\(\)\[\]\|'] reason set to: GCP Error: OPERATION_CANCELED_BY_USER: Operation was canceled by user \."
+--End of show similar entries
+EOT
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+    unit        = "1"
+  }
+  description = "This metric keeps track of the number of times that a node fails to be provisioned due to a GCP error."
+  project = var.project_id
+}
+
+resource "google_logging_metric" "resource-exhaustion-error" {
+  name   = "compute-engine-api/resource-exhaustion-error"
+  filter = <<-EOT
+severity=ERROR
+--Show similar entries
+protoPayload.methodName="v1.compute.regionInstances.bulkInsert"
+protoPayload.status.message="VM_MIN_COUNT_NOT_REACHED,ZONE_RESOURCE_POOL_EXHAUSTED"
+--End of show similar entries
+EOT
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+    unit        = "1"
+  }
+  description = "This metric keeps track of the number of times that a resource exhaustion error is encountered."
+  project = var.project_id
+}
+
 resource "google_logging_metric" "resume-timeout" {
   name   = "slurm-gcp/resume-timeout"
   filter = <<-EOT

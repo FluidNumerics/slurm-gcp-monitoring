@@ -243,8 +243,8 @@ login_nodes = [
       ]
     }
     shielded_instance_config = null
-    source_image_family      = "slurm-gcp-6-3-ubuntu-2004-lts"
-    source_image_project     = "schedmd-slurm-public"
+    source_image_family      = null
+    source_image_project     = null
     source_image             = null
     tags                     = []
 
